@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gulf Coast — Internal Cost Calculator</title>
+  <style>
+    :root{
+      --bg:#0a1630; --panel:#0f2245; --teal:#23c0d9; --text:#ecf5ff;
+      --muted:#9fb3d9; --ring:#23c0d99a; --ok:#38d39f; --err:#ff6b6b;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,var(--bg),#09132a);color:var(--text);font:16px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    .wrap{max-width:980px;margin:40px auto;padding:0 20px}
+    .card{background:var(--panel);border:1px solid #132a59;border-radius:18px;box-shadow:0 10px 30px rgba(0,0,0,.35);padding:24px}
+    header{display:flex;align-items:center;gap:16px;margin-bottom:24px}
+    header img{height:56px}
+    h1{margin:0;color:var(--teal);font-weight:800;letter-spacing:.2px}
+    p.subtitle{margin:.25rem 0 0;color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
+    .field{display:flex;flex-direction:column;gap:6px}
+    label{font-size:.85rem;color:var(--muted)}
+    select,input{background:#0b1d3d;border:1px solid #1a3570;color:var(--text);padding:10px 12px;border-radius:12px;outline:none;transition:.15s}
+    select:focus,input:focus{border-color:var(--teal);box-shadow:0 0 0 3px var(--ring)}
+    .actions{display:flex;gap:12px;justify-content:flex-end;margin-top:18px}
+    button{appearance:none;border:0;border-radius:12px;padding:12px 16px;font-weight:700;cursor:pointer}
+    .btn-primary{background:var(--teal);color:#002333}
+    .btn-ghost{background:transparent;color:var(--text);border:1px solid #2a4e9a}
+    .result{margin-top:18px;border-top:1px dashed #2a4e9a;padding-top:14px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+    .stat{background:#0a1c3a;border:1px solid #142b5a;border-radius:12px;padding:12px}
+    .stat .k{font-size:.8rem;color:var(--muted)}
+    .stat .v{font-size:1.15rem;font-weight:800}
+    .msg{margin-top:10px;font-size:.9rem}
+    .msg.ok{color:var(--ok)} .msg.err{color:var(--err)}
+    footer{margin:26px 0 4px;color:var(--muted);font-size:.8rem;text-align:center}
+    @media (max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <header>
+        <!-- Replace LOGO_URL with your hosted logo URL -->
+        <img src="LOGO_URL" alt="Gulf Coast Supply & Manufacturing" onerror="this.style.display='none'">
+        <div>
+          <h1>Gulf Coast • Internal Cost Calculator</h1>
+          <p class="subtitle">Live numbers from Google Sheets (K:L:M ➜ O). Pick options, enter length, get cost.</p>
+        </div>
+      </header>
+
+      <div class="grid" id="form">
+        <div class="field">
+          <label>Component</label>
+          <select id="component"></select>
+        </div>
+        <div class="field">
+          <label>Color</label>
+          <select id="color"></select>
+        </div>
+        <div class="field">
+          <label>Gauge</label>
+          <select id="gauge"></select>
+        </div>
+        <div class="field">
+          <label>Quantity</label>
+          <input id="qty" type="number" min="1" step="1" value="1" />
+        </div>
+        <div class="field">
+          <label>Feet</label>
+          <input id="feet" type="number" min="0" step="1" value="0" />
+        </div>
+        <div class="field">
+          <label>Inches</label>
+          <input id="inches" type="number" min="0" max="11" step="1" value="0" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-ghost" id="refreshOpts">Reload Options</button>
+        <button class="btn-primary" id="calcBtn">Calculate</button>
+      </div>
+
+      <div class="result" id="result" hidden>
+        <div class="stat"><div class="k">Total Inches (line)</div><div class="v" id="rInches">–</div></div>
+        <div class="stat"><div class="k">Cost / Inch</div><div class="v" id="rCpi">–</div></div>
+        <div class="stat"><div class="k">Extended</div><div class="v" id="rExt">–</div></div>
+        <div class="stat"><div class="k">Source</div><div class="v" id="rSrc">Sheet</div></div>
+      </div>
+
+      <!-- Live table of multiple lines from the sheet (B–I) -->
+      <section style="margin-top:18px">
+        <h2 style="margin:6px 0 10px;color:var(--teal);font-size:1.1rem">Current Lines (B–I)</h2>
+        <div class="actions" style="justify-content:flex-start;margin:8px 0 12px">
+          <button class="btn-ghost" id="loadLines">Reload Lines</button>
+        </div>
+        <div id="linesWrap" class="card" style="background:#0b1d3d;border-radius:14px;padding:0;overflow:auto;border:1px solid #1a3570">
+          <table id="linesTable" style="width:100%;border-collapse:collapse;min-width:760px">
+            <thead>
+              <tr style="background:#0e2146;color:var(--text)">
+                <th style="text-align:left;padding:10px;border-bottom:1px solid #1a3570">Component</th>
+                <th style="text-align:left;padding:10px;border-bottom:1px solid #1a3570">Color</th>
+                <th style="text-align:left;padding:10px;border-bottom:1px solid #1a3570">Gauge</th>
+                <th style="text-align:right;padding:10px;border-bottom:1px solid #1a3570">Qty</th>
+                <th style="text-align:right;padding:10px;border-bottom:1px solid #1a3570">Feet</th>
+                <th style="text-align:right;padding:10px;border-bottom:1px solid #1a3570">Inches</th>
+                <th style="text-align:right;padding:10px;border-bottom:1px solid #1a3570">Total Inches</th>
+                <th style="text-align:right;padding:10px;border-bottom:1px solid #1a3570">Est. Cost</th>
+              </tr>
+            </thead>
+            <tbody id="linesBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="msg" id="msg"></div>
+
+      <footer>Only B–I are intended for public viewing. Pricing table remains hidden/private.</footer>
+    </div>
+  </div>
+
+  <script>
+    // ====== CONFIG ======
+    // Deployed Apps Script URL:
+    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzIt_MmMZ9mT3NpS1hCtlCJzVeU0Bb34bhAZGERCEimP3AvQLWgczQJX_BjXm7-aloBLQ/exec';
+
+    const el = id => document.getElementById(id);
+
+    async function fetchJSON(url){
+      const r = await fetch(url);
+      if(!r.ok) throw new Error('Network error');
+      const j = await r.json();
+      if(j.error) throw new Error(j.error);
+      return j;
+    }
+
+    function setMsg(t, ok){
+      const m = el('msg');
+      m.textContent = t || '';
+      m.className = 'msg ' + (ok===true ? 'ok' : ok===false ? 'err' : '');
+    }
+
+    async function loadOptions(){
+      try{
+        setMsg('Loading options…');
+        const data = await fetchJSON(WEB_APP_URL + '?fn=options');
+        const {components=[], colors=[], gauges=[]} = data;
+        const fill = (sel, items) => {
+          sel.innerHTML = '';
+          items.forEach(v => {
+            const o = document.createElement('option');
+            o.value = o.textContent = v;
+            sel.appendChild(o);
+          });
+        };
+        fill(el('component'), components);
+        fill(el('color'), colors);
+        fill(el('gauge'), gauges);
+        setMsg('Options loaded.', true);
+      }catch(err){ setMsg(err.message, false); }
+    }
+
+    async function calculate(){
+      try{
+        setMsg('Calculating…');
+        const params = new URLSearchParams({
+          fn:'price',
+          component: el('component').value,
+          color: el('color').value,
+          gauge: el('gauge').value,
+          qty: el('qty').value || '1',
+          feet: el('feet').value || '0',
+          inches: el('inches').value || '0'
+        });
+        const data = await fetchJSON(WEB_APP_URL + '?' + params.toString());
+        // data: { totalInches, costPerInch, extended, key }
+        el('rInches').textContent = Number(data.totalInches).toLocaleString();
+        el('rCpi').textContent = '$' + Number(data.costPerInch).toFixed(4);
+        el('rExt').textContent = '$' + Number(data.extended).toFixed(2);
+        el('rSrc').textContent = data.key || 'Sheet';
+        el('result').hidden = false;
+        setMsg('Ready.', true);
+      }catch(err){ setMsg(err.message, false); }
+    }
+
+    // Load lines from the sheet (B–I)
+    async function loadLines(){
+      try{
+        setMsg('Loading lines…');
+        const data = await fetchJSON(WEB_APP_URL + '?fn=lines');
+        const tbody = el('linesBody');
+        tbody.innerHTML = '';
+        const rows = (data && data.rows) || [];
+        rows.forEach(row => {
+          const [component,color,gauge,qty,feet,inches,totalInches,estCost] = row;
+          const tr = document.createElement('tr');
+          const td = (t,align='left') => {
+            const c=document.createElement('td');
+            c.textContent=(t===null||t===undefined)?'':t;
+            c.style.padding='10px';
+            c.style.borderBottom='1px solid #102550';
+            c.style.textAlign=align;
+            return c;
+          };
+          tr.appendChild(td(component));
+          tr.appendChild(td(color));
+          tr.appendChild(td(gauge));
+          tr.appendChild(td(qty,'right'));
+          tr.appendChild(td(feet,'right'));
+          tr.appendChild(td(inches,'right'));
+          tr.appendChild(td(totalInches,'right'));
+          tr.appendChild(td(typeof estCost==='number' ? '$'+Number(estCost).toFixed(2) : estCost,'right'));
+          tbody.appendChild(tr);
+        });
+        setMsg(`Loaded ${rows.length} line(s).`, true);
+      }catch(err){ setMsg(err.message, false); }
+    }
+
+    el('refreshOpts').addEventListener('click', loadOptions);
+    el('calcBtn').addEventListener('click', calculate);
+    el('loadLines').addEventListener('click', loadLines);
+
+    // Auto-load on first visit
+    loadOptions();
+    loadLines();
+  </script>
+</body>
+</html>
