@@ -63,6 +63,13 @@
 
       <!-- Lines container: we’ll render 6 rows -->
       <div id="linesContainer"></div>
+<!-- Totals -->
+<div class="result" id="totalsPanel" style="margin-top:10px">
+  <div class="stat">
+    <div class="k">Subtotal (all lines)</div>
+    <div class="v" id="subtotal">$0.00</div>
+  </div>
+</div>
 
       <h2 class="section-title">Current Lines (B–I)</h2>
       <div class="line-actions" style="justify-content:flex-start;margin:8px 0 12px">
@@ -89,7 +96,12 @@
   <script>
     // ====== CONFIG ======
     const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzIt_MmMZ9mT3NpS1hCtlCJzVeU0Bb34bhAZGERCEimP3AvQLWgczQJX_BjXm7-aloBLQ/exec';
-    const NUM_LINES = 6; // one original + five more
+    const NUM_LINES = 5; // one original + five more
+const extValues = Array(NUM_LINES).fill(0); // store per-line extended values
+function updateTotals(){
+  const sum = extValues.reduce((a,b)=>a + (Number(b)||0), 0);
+  $('subtotal').textContent = '$' + sum.toFixed(2);
+}
 
     const $ = id => document.getElementById(id);
     const qs = (el,sel) => el.querySelector(sel);
@@ -157,6 +169,8 @@
         fill($('gauge-'+i), gauges);
       }
       setMsg('Options loaded.', true);
+      extValues.fill(0); updateTotals();
+
     }
 
     // ----- calculate a single row -----
@@ -175,10 +189,18 @@
         const data = await fetchJSON(WEB_APP_URL + '?' + params.toString() + '&t=' + Date.now());
         $('rInches-'+i).textContent = Number(data.totalInches).toLocaleString();
         $('rCpi-'+i).textContent    = '$' + Number(data.costPerInch).toFixed(4);
-        $('rExt-'+i).textContent    = '$' + Number(data.extended).toFixed(2);
-        $('rSrc-'+i).textContent    = data.key || 'Sheet';
-        $('result-'+i).hidden = false;
-        setMsg('Ready.', true);
+        const ext = Number(data.extended) || 0;
+$('rExt-'+i).textContent = '$' + ext.toFixed(2);
+$('rSrc-'+i).textContent = data.key || 'Sheet';
+$('result-'+i).hidden = false;
+
+// store and update totals
+extValues[i-1] = ext;
+updateTotals();
+
+setMsg('Ready.', true);
+
+        extValues[i-1] = 0; updateTotals();
       }catch(err){ setMsg(err.message, false); }
     }
 
