@@ -21,10 +21,11 @@
     label{font-size:.85rem;color:var(--muted)}
     select,input{background:#0b1d3d;border:1px solid #1a3570;color:var(--text);padding:10px 12px;border-radius:12px;outline:none;transition:.15s;width:100%}
     select:focus,input:focus{border-color:var(--teal);box-shadow:0 0 0 3px var(--ring)}
-    .line-actions{display:flex;gap:10px;align-items:flex-end}
+    .line-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
     button{appearance:none;border:0;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}
     .btn{background:var(--teal);color:#002333}
     .btn-ghost{background:transparent;color:var(--text);border:1px solid #2a4e9a}
+    .btn-danger{background:#ff6b6b;color:#001926}
     .result{margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
     .stat{background:#0a1c3a;border:1px solid #142b5a;border-radius:12px;padding:12px}
     .stat .k{font-size:.8rem;color:var(--muted)}
@@ -52,11 +53,16 @@
       </header>
 
       <div class="line-actions" style="justify-content:space-between;margin-bottom:6px">
-        <button class="btn-ghost" id="reloadOptionsBtn">Reload Options</button>
-        <button class="btn" id="calcAllBtn">Calculate All</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-ghost" id="reloadOptionsBtn">Reload Options</button>
+          <button class="btn-ghost" id="addLineBtn">Add line</button>
+        </div>
+        <div>
+          <button class="btn" id="calcAllBtn">Calculate All</button>
+        </div>
       </div>
 
-      <!-- Lines container: we render 6 rows -->
+      <!-- Lines container: starts with ONE row -->
       <div id="linesContainer"></div>
 
       <!-- Totals -->
@@ -67,8 +73,8 @@
         </div>
       </div>
 
-      <!-- Live summary of current selections (from the form) -->
-      <h2 class="section-title">Your Selections (live)</h2>
+      <!-- Your selections (live, from this page) -->
+      <h2 class="section-title">Your Selections</h2>
       <div class="card" style="background:#0b1d3d;border-radius:14px;padding:0;overflow:auto;border:1px solid #1a3570">
         <table>
           <thead>
@@ -108,107 +114,133 @@
   <script>
     // ====== CONFIG ======
     const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzIt_MmMZ9mT3NpS1hCtlCJzVeU0Bb34bhAZGERCEimP3AvQLWgczQJX_BjXm7-aloBLQ/exec';
-    const NUM_LINES = 6; // first + five more
+    const MAX_LINES = 20;
 
     const $ = id => document.getElementById(id);
     const qs = (el,sel) => el.querySelector(sel);
 
-    // store per-line extended values and sum them
-    const extValues = Array(NUM_LINES).fill(0);
-    function updateTotals(){
-      const sum = extValues.reduce((a,b)=>a + (Number(b)||0), 0);
-      $('subtotal').textContent = '$' + sum.toFixed(2);
-    }
+    let lineCount = 0;                 // dynamic number of rows
+    let extValues = [];                // extended per row, same length as lineCount
+    let cachedOptions = {components:[], colors:[], gauges:[]};
 
     function setMsg(txt, ok){
       const m = $('msg'); m.textContent = txt || '';
       m.className = 'msg ' + (ok===true ? 'ok' : ok===false ? 'err' : '');
     }
-
-    async function fetchJSON(url){
-      const r = await fetch(url);
+    function updateTotals(){
+      const sum = extValues.reduce((a,b)=>a + (Number(b)||0), 0);
+      $('subtotal').textContent = '$' + sum.toFixed(2);
+    }
+    async function fetchJSON(url, init){
+      const r = await fetch(url, init);
       if(!r.ok) throw new Error('Network error');
       const j = await r.json();
       if(j.error) throw new Error(j.error);
       return j;
     }
 
-    // ----- render N calculator rows -----
-    function renderLines(n){
+    // ----- render a single line -----
+    function renderLine(idx){
       const wrap = $('linesContainer');
-      wrap.innerHTML = '';
-      for(let i=1;i<=n;i++){
-        const row = document.createElement('section');
-        row.className = 'row';
-        row.dataset.idx = i;
-        row.innerHTML = `
-          <div class="grid-3">
-            <div class="field"><label>Component</label><select id="component-${i}"></select></div>
-            <div class="field"><label>Color</label><select id="color-${i}"></select></div>
-            <div class="field"><label>Gauge</label><select id="gauge-${i}"></select></div>
+      const row = document.createElement('section');
+      row.className = 'row';
+      row.dataset.idx = idx;
+      row.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <div style="opacity:.8">Line ${idx}</div>
+          <div class="line-actions">
+            <button class="btn-ghost" data-calc-one>Calculate line ${idx}</button>
+            <button class="btn-danger" data-remove>Remove</button>
           </div>
-          <div class="grid-3" style="margin-top:8px">
-            <div class="field"><label>Quantity</label><input id="qty-${i}" type="number" min="1" step="1" value="1"></div>
-            <div class="field"><label>Feet</label><input id="feet-${i}" type="number" min="0" step="1" value="0"></div>
-            <div class="field"><label>Inches</label><input id="inches-${i}" type="number" min="0" max="11" step="1" value="0"></div>
-          </div>
-          <div class="line-actions" style="margin-top:10px">
-            <button class="btn-ghost" data-calc-one>Calculate line ${i}</button>
-          </div>
-          <div class="result" id="result-${i}" hidden>
-            <div class="stat"><div class="k">Total Inches (line)</div><div class="v" id="rInches-${i}">–</div></div>
-            <div class="stat"><div class="k">Cost / Inch</div><div class="v" id="rCpi-${i}">–</div></div>
-            <div class="stat"><div class="k">Extended</div><div class="v" id="rExt-${i}">–</div></div>
-            <div class="stat"><div class="k">Source</div><div class="v" id="rSrc-${i}">Sheet</div></div>
-          </div>
-        `;
-        wrap.appendChild(row);
-        // per-line button
-        qs(row,'[data-calc-one]').addEventListener('click',()=>calculateOne(i));
-      }
+        </div>
+        <div class="grid-3">
+          <div class="field"><label>Component</label><select id="component-${idx}"></select></div>
+          <div class="field"><label>Color</label><select id="color-${idx}"></select></div>
+          <div class="field"><label>Gauge</label><select id="gauge-${idx}"></select></div>
+        </div>
+        <div class="grid-3" style="margin-top:8px">
+          <div class="field"><label>Quantity</label><input id="qty-${idx}" type="number" min="1" step="1" value="1"></div>
+          <div class="field"><label>Feet</label><input id="feet-${idx}" type="number" min="0" step="1" value="0"></div>
+          <div class="field"><label>Inches</label><input id="inches-${idx}" type="number" min="0" max="11" step="1" value="0"></div>
+        </div>
+        <div class="result" id="result-${idx}" hidden>
+          <div class="stat"><div class="k">Total Inches (line)</div><div class="v" id="rInches-${idx}">–</div></div>
+          <div class="stat"><div class="k">Cost / Inch</div><div class="v" id="rCpi-${idx}">–</div></div>
+          <div class="stat"><div class="k">Extended</div><div class="v" id="rExt-${idx}">–</div></div>
+          <div class="stat"><div class="k">Source</div><div class="v" id="rSrc-${idx}">Sheet</div></div>
+        </div>
+      `;
+      wrap.appendChild(row);
+
+      // Fill dropdowns from cached options
+      const fill = (sel, items) => {
+        sel.innerHTML = '';
+        items.forEach(v => {
+          const o = document.createElement('option'); o.value = o.textContent = v; sel.appendChild(o);
+        });
+      };
+      fill($('component-'+idx), cachedOptions.components);
+      fill($('color-'+idx),     cachedOptions.colors);
+      fill($('gauge-'+idx),     cachedOptions.gauges);
+
+      // Handlers
+      qs(row,'[data-calc-one]').addEventListener('click',()=>calculateOne(idx));
+      qs(row,'[data-remove]').addEventListener('click',()=>removeLine(idx));
     }
 
-    // ----- load options and fill every row -----
+    function removeLine(idx){
+      // remove DOM
+      const el = qs($('linesContainer'), `section[data-idx="${idx}"]`);
+      if (el) el.remove();
+      // zero out ext for that index and update totals/summary
+      extValues[idx-1] = 0;
+      updateTotals();
+      renderLiveSummary(buildSummaryRows());
+    }
+
+    // ----- add a new line -----
+    function addLine(){
+      if (lineCount >= MAX_LINES) { setMsg('Max lines reached', false); return; }
+      lineCount++;
+      extValues[lineCount-1] = 0;
+      renderLine(lineCount);
+      renderLiveSummary(buildSummaryRows());
+    }
+
+    // ----- load options once -----
     async function loadOptions(){
       try{
         setMsg('Loading options…');
         const data = await fetchJSON(WEB_APP_URL + '?fn=options&t=' + Date.now());
-        const {components=[], colors=[], gauges=[]} = data;
-        const fill = (sel, items) => {
-          sel.innerHTML = '';
-          items.forEach(v => {
-            const o = document.createElement('option'); o.value = o.textContent = v; sel.appendChild(o);
-          });
+        cachedOptions = {
+          components: data.components || [],
+          colors: data.colors || [],
+          gauges: data.gauges || []
         };
-        for(let i=1;i<=NUM_LINES;i++){
-          fill($('component-'+i), components);
-          fill($('color-'+i), colors);
-          fill($('gauge-'+i), gauges);
-        }
-        // reset totals & summary
-        extValues.fill(0); updateTotals(); renderLiveSummary([]);
+        // if first load and no lines yet, add one
+        if (lineCount === 0) addLine();
         setMsg('Options loaded.', true);
       }catch(err){ setMsg(err.message, false); }
     }
 
-    // helper to read one line (and to test if it’s “filled”)
+    // helper to read one line + determine if filled
     function readLine(i){
-      const component = $('component-'+i).value;
-      const color     = $('color-'+i).value;
-      const gauge     = $('gauge-'+i).value;
-      const qty       = $('qty-'+i).value || '1';
-      const feet      = $('feet-'+i).value || '0';
-      const inches    = $('inches-'+i).value || '0';
+      const component = $('component-'+i)?.value ?? '';
+      const color     = $('color-'+i)?.value ?? '';
+      const gauge     = $('gauge-'+i)?.value ?? '';
+      const qty       = $('qty-'+i)?.value || '1';
+      const feet      = $('feet-'+i)?.value || '0';
+      const inches    = $('inches-'+i)?.value || '0';
       const ftNum     = Number(feet)||0, inNum = Number(inches)||0, qNum = Number(qty)||0;
       const filled    = component && color && gauge && qNum>0 && (ftNum>0 || inNum>0);
       return { i, component, color, gauge, qty, feet, inches, filled };
     }
 
-    // ----- calculate a single row (GET) -----
+    // single-line calc (GET)
     async function calculateOne(i){
       try{
         const line = readLine(i);
-        if (!line.filled){ // gracefully handle blank/zero-length lines
+        if (!line.filled){
           extValues[i-1] = 0; updateTotals();
           $('result-'+i).hidden = false;
           $('rInches-'+i).textContent = '–';
@@ -219,7 +251,6 @@
           renderLiveSummary(buildSummaryRows());
           return;
         }
-
         setMsg('Calculating line ' + i + '…');
         const params = new URLSearchParams({
           fn:'price',
@@ -231,49 +262,40 @@
           inches:    line.inches
         });
         const data = await fetchJSON(WEB_APP_URL + '?' + params.toString() + '&t=' + Date.now());
-
         $('rInches-'+i).textContent = Number(data.totalInches).toLocaleString();
         $('rCpi-'+i).textContent    = '$' + Number(data.costPerInch).toFixed(4);
-
         const ext = Number(data.extended) || 0;
         $('rExt-'+i).textContent = '$' + ext.toFixed(2);
         $('rSrc-'+i).textContent = data.key || 'Sheet';
         $('result-'+i).hidden    = false;
-
-        // store and update totals/summary
         extValues[i-1] = ext; updateTotals();
         renderLiveSummary(buildSummaryRows());
-
         setMsg('Ready.', true);
       }catch(err){
-        // on error, zero out this line so subtotal stays correct
         extValues[i-1] = 0; updateTotals();
         setMsg(err.message, false);
       }
     }
 
-    // ----- calculate all rows (ONE POST, skipping empty lines) -----
+    // Calculate ALL (POST), skipping blank rows
     async function calculateAll(){
       try{
         setMsg('Calculating all lines…');
-
-        const all = []; const mapIdx = []; // map response back to line #
-        for (let i = 1; i <= NUM_LINES; i++){
+        const filled = []; const mapIdx = [];
+        for (let i=1;i<=lineCount;i++){
           const ln = readLine(i);
-          if (ln.filled){ all.push(ln); mapIdx.push(i); } else { extValues[i-1] = 0; }
+          if (ln.filled){ filled.push(ln); mapIdx.push(i); } else { extValues[i-1] = 0; }
         }
-
-        if (all.length === 0){
+        if (filled.length === 0){
           updateTotals(); renderLiveSummary([]); setMsg('No filled lines to calculate.', true);
           return;
         }
-
         const resp = await fetch(WEB_APP_URL, {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
             fn: 'price_batch',
-            lines: all.map(({component,color,gauge,qty,feet,inches}) => ({component,color,gauge,qty,feet,inches})),
+            lines: filled.map(({component,color,gauge,qty,feet,inches}) => ({component,color,gauge,qty,feet,inches})),
             t: Date.now()
           })
         });
@@ -281,7 +303,6 @@
         const data = await resp.json();
         if (data.error) throw new Error(data.error);
 
-        // Update each filled row
         (data.lines || []).forEach((r, idx) => {
           const i = mapIdx[idx];
           if (r.error){
@@ -304,28 +325,25 @@
         updateTotals();
         renderLiveSummary(buildSummaryRows());
         setMsg('Ready.', true);
-      } catch(err){
+      }catch(err){
         setMsg(err.message, false);
       }
     }
 
-    // ----- live summary (from the form/calculated lines) -----
+    // live summary build/render
     function buildSummaryRows(){
       const rows = [];
-      for (let i=1;i<=NUM_LINES;i++){
+      for (let i=1;i<=lineCount;i++){
         const ln = readLine(i);
         const ext = Number(extValues[i-1])||0;
         if (!ln.filled && ext===0) continue;
         const totalInches = (Number(ln.qty)||0) * (12*(Number(ln.feet)||0) + (Number(ln.inches)||0));
-        rows.push({
-          i, component: ln.component, color: ln.color, gauge: ln.gauge,
-          qty: ln.qty, feet: ln.feet, inches: ln.inches,
-          totalInches, extended: ext
-        });
+        rows.push({ i, component:ln.component, color:ln.color, gauge:ln.gauge,
+                    qty:ln.qty, feet:ln.feet, inches:ln.inches,
+                    totalInches, extended:ext });
       }
       return rows;
     }
-
     function renderLiveSummary(rows){
       const tbody = $('liveSummaryBody'); tbody.innerHTML = '';
       rows.forEach(r=>{
@@ -344,7 +362,7 @@
       });
     }
 
-    // ----- load public B–I lines table -----
+    // public sheet B–I viewer
     async function loadSheetLines(){
       try{
         setMsg('Loading lines…');
@@ -364,13 +382,17 @@
       }catch(err){ setMsg(err.message, false); }
     }
 
-    // ----- boot -----
-    renderLines(NUM_LINES);
-    loadOptions();
-    loadSheetLines();
+    // boot
+    (async function init(){
+      await loadOptions();         // loads options and adds first line
+      updateTotals();
+      renderLiveSummary([]);
+      loadSheetLines();
+    })();
 
     // header buttons
     $('reloadOptionsBtn').addEventListener('click', loadOptions);
+    $('addLineBtn').addEventListener('click', addLine);
     $('calcAllBtn').addEventListener('click', calculateAll);
     $('loadSheetLinesBtn').addEventListener('click', loadSheetLines);
   </script>
