@@ -38,6 +38,20 @@
     .msg{margin-top:12px;font-size:.9rem}
     .msg.ok{color:var(--ok)} .msg.err{color:var(--err)}
     footer{margin:26px 0 4px;color:var(--muted);font-size:.8rem;text-align:center}
+
+    /* Clean print layout for the summary view */
+    @media print {
+      body{ background:#fff; color:#000; }
+      .card, .result, .line-actions, header img { box-shadow:none !important }
+      .line-actions, #linesContainer, #totalsPanel + .section-title, 
+      #loadSheetLinesBtn, #sheetLinesBody, footer, .msg { display:none !important; }
+      .card{ border:none }
+      table, th, td { border:1px solid #ccc; border-collapse:collapse }
+      th, td { color:#000 !important }
+      a { color:#000 !important; text-decoration:none }
+      @page { margin: 16mm }
+    }
+
     @media (max-width:900px){.result{grid-template-columns:repeat(2,1fr)}}
   </style>
 </head>
@@ -56,6 +70,7 @@
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn-ghost" id="reloadOptionsBtn">Reload Options</button>
           <button class="btn-ghost" id="addLineBtn">Add line</button>
+          <button class="btn-ghost" id="printBtn">Print / Save PDF</button>
         </div>
         <div>
           <button class="btn" id="calcAllBtn">Calculate All</button>
@@ -383,7 +398,73 @@
       }
     }
 
-    // live summary
+    // ---- Print helpers ----
+    function fmtMoney(n){ return '$' + (Number(n)||0).toFixed(2); }
+    function todayISO(){
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    }
+    function buildPrintHtml(rows, subtotal){
+      const logo = 'LOGO_URL'; // replace if you want the logo on the print
+      const head = `
+<!DOCTYPE html><html><head>
+<meta charset="utf-8"><title>Gulf Coast • Estimate ${todayISO()}</title>
+<style>
+  body{font:14px/1.4 system-ui,Segoe UI,Roboto,Arial,sans-serif;color:#000;padding:16px}
+  .top{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+  .top img{height:44px}
+  h2{margin:0 0 4px 0;font-size:20px}
+  .meta{color:#333;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid #ccc;padding:8px;text-align:left;font-size:13px}
+  th{background:#f2f6fb}
+  td.num{text-align:right}
+  .subtotal{margin-top:10px;text-align:right;font-weight:700;font-size:16px}
+  .note{margin-top:12px;font-size:12px;color:#444}
+  @page { margin:16mm }
+</style>
+</head><body>
+<div class="top">
+  ${logo && logo!=='LOGO_URL' ? `<img src="${logo}" alt="Gulf Coast">` : ''}
+  <div>
+    <h2>Gulf Coast • Internal Cost Estimate</h2>
+    <div class="meta">Generated: ${new Date().toLocaleString()}</div>
+  </div>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th>#</th><th>Component</th><th>Color</th><th>Gauge</th>
+      <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
+      <th class="num">Total Inches</th><th class="num">Extended</th>
+    </tr>
+  </thead>
+  <tbody>
+`;
+      const body = rows.map(r => `
+  <tr>
+    <td>${r.i}</td>
+    <td>${r.component||''}</td>
+    <td>${r.color||''}</td>
+    <td>${r.gauge||''}</td>
+    <td class="num">${r.qty||0}</td>
+    <td class="num">${r.feet||0}</td>
+    <td class="num">${r.inches||0}</td>
+    <td class="num">${Number(r.totalInches||0).toLocaleString()}</td>
+    <td class="num">${fmtMoney(r.extended||0)}</td>
+  </tr>`).join('');
+      const tail = `
+  </tbody>
+</table>
+<div class="subtotal">Subtotal: ${fmtMoney(subtotal)}</div>
+<div class="note">For internal use only. Pricing sourced live from Google Sheets (K:L:M ➜ O).</div>
+<script>window.onload = () => window.print();<\/script>
+</body></html>`;
+      return head + body + tail;
+    }
+    function computeSubtotal(){
+      return extValues.reduce((a,b)=>a + (Number(b)||0), 0);
+    }
     function buildSummaryRows(){
       const rows = [];
       const rendered = Array.from(document.querySelectorAll('#linesContainer section.row'));
@@ -399,22 +480,12 @@
       });
       return rows;
     }
-    function renderLiveSummary(rows){
-      const tbody = $('liveSummaryBody'); tbody.innerHTML = '';
-      rows.forEach(r=>{
-        const tr = document.createElement('tr');
-        const td = (t,c)=>{ const d=document.createElement('td'); d.textContent=(t??''); if(c) d.className=c; return d; };
-        tr.appendChild(td(r.i));
-        tr.appendChild(td(r.component));
-        tr.appendChild(td(r.color));
-        tr.appendChild(td(r.gauge));
-        tr.appendChild(td(r.qty,'num'));
-        tr.appendChild(td(r.feet,'num'));
-        tr.appendChild(td(r.inches,'num'));
-        tr.appendChild(td(Number(r.totalInches).toLocaleString(),'num'));
-        tr.appendChild(td('$'+(Number(r.extended)||0).toFixed(2),'num'));
-        tbody.appendChild(tr);
-      });
+    function printSelections(){
+      const rows = buildSummaryRows();
+      if (!rows.length){ setMsg('Nothing to print yet.', false); return; }
+      const html = buildPrintHtml(rows, computeSubtotal());
+      const w = window.open('', '_blank');
+      w.document.open(); w.document.write(html); w.document.close();
     }
 
     // public sheet B–I viewer
@@ -450,6 +521,26 @@
     $('addLineBtn').addEventListener('click', addLine);
     $('calcAllBtn').addEventListener('click', calculateAll);
     $('loadSheetLinesBtn').addEventListener('click', loadSheetLines);
+    $('printBtn').addEventListener('click', printSelections);
+
+    // live summary renderer
+    function renderLiveSummary(rows){
+      const tbody = $('liveSummaryBody'); tbody.innerHTML = '';
+      rows.forEach(r=>{
+        const tr = document.createElement('tr');
+        const td = (t,c)=>{ const d=document.createElement('td'); d.textContent=(t??''); if(c) d.className=c; return d; };
+        tr.appendChild(td(r.i));
+        tr.appendChild(td(r.component));
+        tr.appendChild(td(r.color));
+        tr.appendChild(td(r.gauge));
+        tr.appendChild(td(r.qty,'num'));
+        tr.appendChild(td(r.feet,'num'));
+        tr.appendChild(td(r.inches,'num'));
+        tr.appendChild(td(Number(r.totalInches).toLocaleString(),'num'));
+        tr.appendChild(td('$'+(Number(r.extended)||0).toFixed(2),'num'));
+        tbody.appendChild(tr);
+      });
+    }
   </script>
 </body>
 </html>
