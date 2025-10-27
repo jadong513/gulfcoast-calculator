@@ -115,12 +115,13 @@
     // ====== CONFIG ======
     const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzIt_MmMZ9mT3NpS1hCtlCJzVeU0Bb34bhAZGERCEimP3AvQLWgczQJX_BjXm7-aloBLQ/exec';
     const MAX_LINES = 20;
+    const POST_TIMEOUT_MS = 12000;
 
     const $ = id => document.getElementById(id);
     const qs = (el,sel) => el.querySelector(sel);
 
     let lineCount = 0;                 // dynamic number of rows
-    let extValues = [];                // extended per row, same length as lineCount
+    let extValues = [];                // extended per row, indexed by (line-1)
     let cachedOptions = {components:[], colors:[], gauges:[]};
 
     function setMsg(txt, ok){
@@ -131,12 +132,30 @@
       const sum = extValues.reduce((a,b)=>a + (Number(b)||0), 0);
       $('subtotal').textContent = '$' + sum.toFixed(2);
     }
-    async function fetchJSON(url, init){
-      const r = await fetch(url, init);
-      if(!r.ok) throw new Error('Network error');
+    function delay(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+    async function fetchJSON(url){
+      const r = await fetch(url);
+      if(!r.ok) throw new Error('Network error: ' + r.status);
       const j = await r.json();
       if(j.error) throw new Error(j.error);
       return j;
+    }
+    async function postJSON(url, bodyObj){
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(), POST_TIMEOUT_MS);
+      try{
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(bodyObj),
+          signal: ctrl.signal
+        });
+        if(!r.ok) throw new Error('Network error: ' + r.status);
+        const j = await r.json();
+        if(j.error) throw new Error(j.error);
+        return j;
+      } finally { clearTimeout(t); }
     }
 
     // ----- render a single line -----
@@ -189,19 +208,17 @@
     }
 
     function removeLine(idx){
-      // remove DOM
       const el = qs($('linesContainer'), `section[data-idx="${idx}"]`);
       if (el) el.remove();
-      // zero out ext for that index and update totals/summary
-      extValues[idx-1] = 0;
+      extValues[idx-1] = 0;  // zero this line’s contribution
       updateTotals();
       renderLiveSummary(buildSummaryRows());
     }
 
-    // ----- add a new line -----
     function addLine(){
-      if (lineCount >= MAX_LINES) { setMsg('Max lines reached', false); return; }
-      lineCount++;
+      const countNow = document.querySelectorAll('#linesContainer section.row').length;
+      if (countNow >= MAX_LINES) { setMsg('Max lines reached', false); return; }
+      lineCount = Math.max(lineCount, countNow) + 1;
       extValues[lineCount-1] = 0;
       renderLine(lineCount);
       renderLiveSummary(buildSummaryRows());
@@ -218,12 +235,15 @@
           gauges: data.gauges || []
         };
         // if first load and no lines yet, add one
-        if (lineCount === 0) addLine();
+        if (document.querySelectorAll('#linesContainer section.row').length === 0) {
+          lineCount = 0; extValues = [];
+          addLine();
+        }
         setMsg('Options loaded.', true);
       }catch(err){ setMsg(err.message, false); }
     }
 
-    // helper to read one line + determine if filled
+    // read one line + determine if filled
     function readLine(i){
       const component = $('component-'+i)?.value ?? '';
       const color     = $('color-'+i)?.value ?? '';
@@ -277,32 +297,62 @@
       }
     }
 
-    // Calculate ALL (POST), skipping blank rows
+    // Calculate ALL (POST), skipping blanks, with fallback
     async function calculateAll(){
+      const btn = $('calcAllBtn');
       try{
+        btn.disabled = true; btn.textContent = 'Calculating…';
         setMsg('Calculating all lines…');
+
+        // Determine current number of rendered rows
+        const rows = Array.from(document.querySelectorAll('#linesContainer section.row'));
+        const ids = rows.map(r => Number(r.dataset.idx)).filter(Boolean);
+        if (ids.length === 0){ setMsg('No rows found.', false); return; }
+
         const filled = []; const mapIdx = [];
-        for (let i=1;i<=lineCount;i++){
+        ids.forEach(i => {
           const ln = readLine(i);
           if (ln.filled){ filled.push(ln); mapIdx.push(i); } else { extValues[i-1] = 0; }
-        }
+        });
+
         if (filled.length === 0){
           updateTotals(); renderLiveSummary([]); setMsg('No filled lines to calculate.', true);
           return;
         }
-        const resp = await fetch(WEB_APP_URL, {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({
+
+        // Try fast POST
+        let data;
+        try{
+          data = await postJSON(WEB_APP_URL, {
             fn: 'price_batch',
             lines: filled.map(({component,color,gauge,qty,feet,inches}) => ({component,color,gauge,qty,feet,inches})),
             t: Date.now()
-          })
-        });
-        if (!resp.ok) throw new Error('Network error');
-        const data = await resp.json();
-        if (data.error) throw new Error(data.error);
+          });
+        }catch(e){
+          console.warn('Batch POST failed, falling back to per-line GET. Reason:', e);
+          // Fallback — do individual GETs
+          data = { lines: [] };
+          for (const ln of filled){
+            const params = new URLSearchParams({
+              fn:'price',
+              component: ln.component,
+              color:     ln.color,
+              gauge:     ln.gauge,
+              qty:       ln.qty,
+              feet:      ln.feet,
+              inches:    ln.inches
+            });
+            try{
+              const one = await fetchJSON(WEB_APP_URL + '?' + params.toString() + '&t=' + Date.now());
+              data.lines.push(one);
+              await delay(60); // gentle pacing
+            }catch(errLine){
+              data.lines.push({ error: String(errLine), key: `${ln.component}|${ln.color}|${ln.gauge}` });
+            }
+          }
+        }
 
+        // Update each filled row
         (data.lines || []).forEach((r, idx) => {
           const i = mapIdx[idx];
           if (r.error){
@@ -310,14 +360,14 @@
             $('rCpi-'+i).textContent    = '–';
             $('rExt-'+i).textContent    = '$0.00';
             $('rSrc-'+i).textContent    = r.key || 'Sheet';
-            $('result-'+i).hidden = false;
+            $('result-'+i).hidden       = false;
             extValues[i-1] = 0;
           } else {
             $('rInches-'+i).textContent = Number(r.totalInches).toLocaleString();
             $('rCpi-'+i).textContent    = '$' + Number(r.costPerInch).toFixed(4);
             $('rExt-'+i).textContent    = '$' + Number(r.extended).toFixed(2);
             $('rSrc-'+i).textContent    = r.key || 'Sheet';
-            $('result-'+i).hidden = false;
+            $('result-'+i).hidden       = false;
             extValues[i-1] = Number(r.extended) || 0;
           }
         });
@@ -326,22 +376,27 @@
         renderLiveSummary(buildSummaryRows());
         setMsg('Ready.', true);
       }catch(err){
-        setMsg(err.message, false);
+        console.error(err);
+        setMsg(String(err), false);
+      }finally{
+        btn.disabled = false; btn.textContent = 'Calculate All';
       }
     }
 
-    // live summary build/render
+    // live summary
     function buildSummaryRows(){
       const rows = [];
-      for (let i=1;i<=lineCount;i++){
+      const rendered = Array.from(document.querySelectorAll('#linesContainer section.row'));
+      const ids = rendered.map(r => Number(r.dataset.idx)).filter(Boolean);
+      ids.forEach(i => {
         const ln = readLine(i);
         const ext = Number(extValues[i-1])||0;
-        if (!ln.filled && ext===0) continue;
+        if (!ln.filled && ext===0) return;
         const totalInches = (Number(ln.qty)||0) * (12*(Number(ln.feet)||0) + (Number(ln.inches)||0));
         rows.push({ i, component:ln.component, color:ln.color, gauge:ln.gauge,
                     qty:ln.qty, feet:ln.feet, inches:ln.inches,
                     totalInches, extended:ext });
-      }
+      });
       return rows;
     }
     function renderLiveSummary(rows){
