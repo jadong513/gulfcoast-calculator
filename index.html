@@ -16,10 +16,10 @@
     h1{margin:0;color:var(--teal);font-weight:800;letter-spacing:.2px}
     p.subtitle{margin:.25rem 0 0;color:var(--muted)}
     .row{border-top:1px dashed #2a4e9a;padding-top:14px;margin-top:14px}
-    .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
+    .grid-3{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:14px}
     .field{display:flex;flex-direction:column;gap:6px}
     label{font-size:.85rem;color:var(--muted)}
-    select,input{background:#0b1d3d;border:1px solid #1a3570;color:var(--text);padding:10px 12px;border-radius:12px;outline:none;transition:.15s}
+    select,input{background:#0b1d3d;border:1px solid #1a3570;color:var(--text);padding:10px 12px;border-radius:12px;outline:none;transition:.15s;width:100%}
     select:focus,input:focus{border-color:var(--teal);box-shadow:0 0 0 3px var(--ring)}
     .line-actions{display:flex;gap:10px;align-items:flex-end}
     button{appearance:none;border:0;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}
@@ -37,14 +37,13 @@
     .msg{margin-top:12px;font-size:.9rem}
     .msg.ok{color:var(--ok)} .msg.err{color:var(--err)}
     footer{margin:26px 0 4px;color:var(--muted);font-size:.8rem;text-align:center}
-    @media (max-width:900px){.grid{grid-template-columns:repeat(2,1fr)} .result{grid-template-columns:repeat(2,1fr)}}
+    @media (max-width:900px){.result{grid-template-columns:repeat(2,1fr)}}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <header>
-        <!-- Replace with your hosted logo URL -->
         <img src="LOGO_URL" alt="Gulf Coast Supply & Manufacturing" onerror="this.style.display='none'">
         <div>
           <h1>Gulf Coast • Internal Cost Calculator</h1>
@@ -53,12 +52,8 @@
       </header>
 
       <div class="line-actions" style="justify-content:space-between;margin-bottom:6px">
-        <div>
-          <button class="btn-ghost" id="reloadOptionsBtn">Reload Options</button>
-        </div>
-        <div>
-          <button class="btn" id="calcAllBtn">Calculate All</button>
-        </div>
+        <button class="btn-ghost" id="reloadOptionsBtn">Reload Options</button>
+        <button class="btn" id="calcAllBtn">Calculate All</button>
       </div>
 
       <!-- Lines container: we render 6 rows -->
@@ -72,6 +67,22 @@
         </div>
       </div>
 
+      <!-- Live summary of current selections (from the form) -->
+      <h2 class="section-title">Your Selections (live)</h2>
+      <div class="card" style="background:#0b1d3d;border-radius:14px;padding:0;overflow:auto;border:1px solid #1a3570">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Component</th><th>Color</th><th>Gauge</th>
+              <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
+              <th class="num">Total Inches</th><th class="num">Extended</th>
+            </tr>
+          </thead>
+          <tbody id="liveSummaryBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Public view from sheet (B–I) -->
       <h2 class="section-title">Current Lines (B–I)</h2>
       <div class="line-actions" style="justify-content:flex-start;margin:8px 0 12px">
         <button class="btn-ghost" id="loadSheetLinesBtn">Reload Lines</button>
@@ -131,10 +142,12 @@
         row.className = 'row';
         row.dataset.idx = i;
         row.innerHTML = `
-          <div class="grid">
+          <div class="grid-3">
             <div class="field"><label>Component</label><select id="component-${i}"></select></div>
             <div class="field"><label>Color</label><select id="color-${i}"></select></div>
-            <div class="field"><label>Gauge</label><select id="gauge-${i}"></></div>
+            <div class="field"><label>Gauge</label><select id="gauge-${i}"></select></div>
+          </div>
+          <div class="grid-3" style="margin-top:8px">
             <div class="field"><label>Quantity</label><input id="qty-${i}" type="number" min="1" step="1" value="1"></div>
             <div class="field"><label>Feet</label><input id="feet-${i}" type="number" min="0" step="1" value="0"></div>
             <div class="field"><label>Inches</label><input id="inches-${i}" type="number" min="0" max="11" step="1" value="0"></div>
@@ -149,8 +162,6 @@
             <div class="stat"><div class="k">Source</div><div class="v" id="rSrc-${i}">Sheet</div></div>
           </div>
         `;
-        // fix gauge select typo that might break DOM creation in some browsers
-        row.innerHTML = row.innerHTML.replace('<select id="gauge-'+i+'"></>', '<select id="gauge-'+i+'"></select>');
         wrap.appendChild(row);
         // per-line button
         qs(row,'[data-calc-one]').addEventListener('click',()=>calculateOne(i));
@@ -174,24 +185,50 @@
           fill($('color-'+i), colors);
           fill($('gauge-'+i), gauges);
         }
-        // reset totals
-        extValues.fill(0); updateTotals();
+        // reset totals & summary
+        extValues.fill(0); updateTotals(); renderLiveSummary([]);
         setMsg('Options loaded.', true);
       }catch(err){ setMsg(err.message, false); }
+    }
+
+    // helper to read one line (and to test if it’s “filled”)
+    function readLine(i){
+      const component = $('component-'+i).value;
+      const color     = $('color-'+i).value;
+      const gauge     = $('gauge-'+i).value;
+      const qty       = $('qty-'+i).value || '1';
+      const feet      = $('feet-'+i).value || '0';
+      const inches    = $('inches-'+i).value || '0';
+      const ftNum     = Number(feet)||0, inNum = Number(inches)||0, qNum = Number(qty)||0;
+      const filled    = component && color && gauge && qNum>0 && (ftNum>0 || inNum>0);
+      return { i, component, color, gauge, qty, feet, inches, filled };
     }
 
     // ----- calculate a single row (GET) -----
     async function calculateOne(i){
       try{
+        const line = readLine(i);
+        if (!line.filled){ // gracefully handle blank/zero-length lines
+          extValues[i-1] = 0; updateTotals();
+          $('result-'+i).hidden = false;
+          $('rInches-'+i).textContent = '–';
+          $('rCpi-'+i).textContent    = '–';
+          $('rExt-'+i).textContent    = '$0.00';
+          $('rSrc-'+i).textContent    = 'Sheet';
+          setMsg(`Line ${i} is empty — skipped.`, true);
+          renderLiveSummary(buildSummaryRows());
+          return;
+        }
+
         setMsg('Calculating line ' + i + '…');
         const params = new URLSearchParams({
           fn:'price',
-          component: $('component-'+i).value,
-          color:     $('color-'+i).value,
-          gauge:     $('gauge-'+i).value,
-          qty:       $('qty-'+i).value || '1',
-          feet:      $('feet-'+i).value || '0',
-          inches:    $('inches-'+i).value || '0'
+          component: line.component,
+          color:     line.color,
+          gauge:     line.gauge,
+          qty:       line.qty,
+          feet:      line.feet,
+          inches:    line.inches
         });
         const data = await fetchJSON(WEB_APP_URL + '?' + params.toString() + '&t=' + Date.now());
 
@@ -203,76 +240,108 @@
         $('rSrc-'+i).textContent = data.key || 'Sheet';
         $('result-'+i).hidden    = false;
 
-        // store and update totals
-        extValues[i-1] = ext;
-        updateTotals();
+        // store and update totals/summary
+        extValues[i-1] = ext; updateTotals();
+        renderLiveSummary(buildSummaryRows());
 
         setMsg('Ready.', true);
       }catch(err){
         // on error, zero out this line so subtotal stays correct
-        extValues[i-1] = 0;
-        updateTotals();
+        extValues[i-1] = 0; updateTotals();
         setMsg(err.message, false);
       }
     }
 
-    // helper to read one line
-    function readLine(i){
-      return {
-        component: $('component-'+i).value,
-        color:     $('color-'+i).value,
-        gauge:     $('gauge-'+i).value,
-        qty:       $('qty-'+i).value || '1',
-        feet:      $('feet-'+i).value || '0',
-        inches:    $('inches-'+i).value || '0'
-      };
-    }
-
-    // ----- calculate all rows (ONE POST) -----
+    // ----- calculate all rows (ONE POST, skipping empty lines) -----
     async function calculateAll(){
       try{
         setMsg('Calculating all lines…');
 
-        // Gather all visible lines
-        const lines = [];
-        for (let i = 1; i <= NUM_LINES; i++) lines.push(readLine(i));
+        const all = []; const mapIdx = []; // map response back to line #
+        for (let i = 1; i <= NUM_LINES; i++){
+          const ln = readLine(i);
+          if (ln.filled){ all.push(ln); mapIdx.push(i); } else { extValues[i-1] = 0; }
+        }
 
-        // Single POST to Apps Script
+        if (all.length === 0){
+          updateTotals(); renderLiveSummary([]); setMsg('No filled lines to calculate.', true);
+          return;
+        }
+
         const resp = await fetch(WEB_APP_URL, {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ fn: 'price_batch', lines, t: Date.now() })
+          body: JSON.stringify({
+            fn: 'price_batch',
+            lines: all.map(({component,color,gauge,qty,feet,inches}) => ({component,color,gauge,qty,feet,inches})),
+            t: Date.now()
+          })
         });
         if (!resp.ok) throw new Error('Network error');
         const data = await resp.json();
         if (data.error) throw new Error(data.error);
 
-        // Update each row
+        // Update each filled row
         (data.lines || []).forEach((r, idx) => {
-          const i = idx + 1;
+          const i = mapIdx[idx];
           if (r.error){
             $('rInches-'+i).textContent = '–';
             $('rCpi-'+i).textContent    = '–';
             $('rExt-'+i).textContent    = '$0.00';
             $('rSrc-'+i).textContent    = r.key || 'Sheet';
             $('result-'+i).hidden = false;
-            extValues[idx] = 0;
+            extValues[i-1] = 0;
           } else {
             $('rInches-'+i).textContent = Number(r.totalInches).toLocaleString();
             $('rCpi-'+i).textContent    = '$' + Number(r.costPerInch).toFixed(4);
             $('rExt-'+i).textContent    = '$' + Number(r.extended).toFixed(2);
             $('rSrc-'+i).textContent    = r.key || 'Sheet';
             $('result-'+i).hidden = false;
-            extValues[idx] = Number(r.extended) || 0;
+            extValues[i-1] = Number(r.extended) || 0;
           }
         });
 
-        // Update subtotal once
         updateTotals();
+        renderLiveSummary(buildSummaryRows());
         setMsg('Ready.', true);
       } catch(err){
         setMsg(err.message, false);
       }
+    }
+
+    // ----- live summary (from the form/calculated lines) -----
+    function buildSummaryRows(){
+      const rows = [];
+      for (let i=1;i<=NUM_LINES;i++){
+        const ln = readLine(i);
+        const ext = Number(extValues[i-1])||0;
+        if (!ln.filled && ext===0) continue;
+        const totalInches = (Number(ln.qty)||0) * (12*(Number(ln.feet)||0) + (Number(ln.inches)||0));
+        rows.push({
+          i, component: ln.component, color: ln.color, gauge: ln.gauge,
+          qty: ln.qty, feet: ln.feet, inches: ln.inches,
+          totalInches, extended: ext
+        });
+      }
+      return rows;
+    }
+
+    function renderLiveSummary(rows){
+      const tbody = $('liveSummaryBody'); tbody.innerHTML = '';
+      rows.forEach(r=>{
+        const tr = document.createElement('tr');
+        const td = (t,c)=>{ const d=document.createElement('td'); d.textContent=(t??''); if(c) d.className=c; return d; };
+        tr.appendChild(td(r.i));
+        tr.appendChild(td(r.component));
+        tr.appendChild(td(r.color));
+        tr.appendChild(td(r.gauge));
+        tr.appendChild(td(r.qty,'num'));
+        tr.appendChild(td(r.feet,'num'));
+        tr.appendChild(td(r.inches,'num'));
+        tr.appendChild(td(Number(r.totalInches).toLocaleString(),'num'));
+        tr.appendChild(td('$'+(Number(r.extended)||0).toFixed(2),'num'));
+        tbody.appendChild(tr);
+      });
     }
 
     // ----- load public B–I lines table -----
