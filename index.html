@@ -134,7 +134,7 @@
           <div class="grid">
             <div class="field"><label>Component</label><select id="component-${i}"></select></div>
             <div class="field"><label>Color</label><select id="color-${i}"></select></div>
-            <div class="field"><label>Gauge</label><select id="gauge-${i}"></select></div>
+            <div class="field"><label>Gauge</label><select id="gauge-${i}"></></div>
             <div class="field"><label>Quantity</label><input id="qty-${i}" type="number" min="1" step="1" value="1"></div>
             <div class="field"><label>Feet</label><input id="feet-${i}" type="number" min="0" step="1" value="0"></div>
             <div class="field"><label>Inches</label><input id="inches-${i}" type="number" min="0" max="11" step="1" value="0"></div>
@@ -149,6 +149,8 @@
             <div class="stat"><div class="k">Source</div><div class="v" id="rSrc-${i}">Sheet</div></div>
           </div>
         `;
+        // fix gauge select typo that might break DOM creation in some browsers
+        row.innerHTML = row.innerHTML.replace('<select id="gauge-'+i+'"></>', '<select id="gauge-'+i+'"></select>');
         wrap.appendChild(row);
         // per-line button
         qs(row,'[data-calc-one]').addEventListener('click',()=>calculateOne(i));
@@ -178,7 +180,7 @@
       }catch(err){ setMsg(err.message, false); }
     }
 
-    // ----- calculate a single row -----
+    // ----- calculate a single row (GET) -----
     async function calculateOne(i){
       try{
         setMsg('Calculating line ' + i + '…');
@@ -214,10 +216,62 @@
       }
     }
 
-    // ----- calculate all rows -----
+    // helper to read one line
+    function readLine(i){
+      return {
+        component: $('component-'+i).value,
+        color:     $('color-'+i).value,
+        gauge:     $('gauge-'+i).value,
+        qty:       $('qty-'+i).value || '1',
+        feet:      $('feet-'+i).value || '0',
+        inches:    $('inches-'+i).value || '0'
+      };
+    }
+
+    // ----- calculate all rows (ONE POST) -----
     async function calculateAll(){
-      for(let i=1;i<=NUM_LINES;i++){
-        await calculateOne(i);
+      try{
+        setMsg('Calculating all lines…');
+
+        // Gather all visible lines
+        const lines = [];
+        for (let i = 1; i <= NUM_LINES; i++) lines.push(readLine(i));
+
+        // Single POST to Apps Script
+        const resp = await fetch(WEB_APP_URL, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ fn: 'price_batch', lines, t: Date.now() })
+        });
+        if (!resp.ok) throw new Error('Network error');
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        // Update each row
+        (data.lines || []).forEach((r, idx) => {
+          const i = idx + 1;
+          if (r.error){
+            $('rInches-'+i).textContent = '–';
+            $('rCpi-'+i).textContent    = '–';
+            $('rExt-'+i).textContent    = '$0.00';
+            $('rSrc-'+i).textContent    = r.key || 'Sheet';
+            $('result-'+i).hidden = false;
+            extValues[idx] = 0;
+          } else {
+            $('rInches-'+i).textContent = Number(r.totalInches).toLocaleString();
+            $('rCpi-'+i).textContent    = '$' + Number(r.costPerInch).toFixed(4);
+            $('rExt-'+i).textContent    = '$' + Number(r.extended).toFixed(2);
+            $('rSrc-'+i).textContent    = r.key || 'Sheet';
+            $('result-'+i).hidden = false;
+            extValues[idx] = Number(r.extended) || 0;
+          }
+        });
+
+        // Update subtotal once
+        updateTotals();
+        setMsg('Ready.', true);
+      } catch(err){
+        setMsg(err.message, false);
       }
     }
 
