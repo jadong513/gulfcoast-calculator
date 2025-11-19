@@ -188,18 +188,32 @@
     // ----- helpers for conditional dropdowns -----
 
     function rebuildSelectOptions(selectEl, allowedValues, currentValue) {
-      if (!selectEl) return;
-      const prev = currentValue ?? selectEl.value ?? '';
-      selectEl.innerHTML = '';
-      allowedValues.forEach(v => {
-        const o = document.createElement('option');
-        o.value = o.textContent = v;
-        selectEl.appendChild(o);
-      });
-      if (prev && allowedValues.includes(prev)) {
-        selectEl.value = prev;
-      }
+  if (!selectEl) return;
+  const prev = currentValue ?? selectEl.value ?? '';
+  selectEl.innerHTML = '';
+
+  allowedValues.forEach(v => {
+    const o = document.createElement('option');
+
+    // Always keep the raw sheet value as the value
+    o.value = v;
+
+    // If this is the Web (flange) dropdown, change the label
+    if (selectEl.id && selectEl.id.startsWith('flange-')) {
+      // Show "Web" instead of "Flange" to the user
+      o.textContent = v.replace('Flange', 'Web');
+    } else {
+      // Other dropdowns: show the value as-is
+      o.textContent = v;
     }
+
+    selectEl.appendChild(o);
+  });
+
+  if (prev && allowedValues.includes(prev)) {
+    selectEl.value = prev;
+  }
+}
 
     function updateLineOptions(idx) {
       const compSel   = $('component-' + idx);
