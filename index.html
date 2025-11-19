@@ -139,7 +139,7 @@
 
   <script>
     // ====== CONFIG ======
-    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxd7mrAzpNvDZYN59riprG6keK36ZOUx-9TBlhCp3MnlKh1akP2DQaT9SxcmkJ21x2_VA/exec';
+    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzW5HZ_8wnwTs6Z4dQ9U6780Ea0pY-jye62R5b1ieDE0TvtgEGXdBzgCoz4ekgXJLNDGw/exec';
     const MAX_LINES = 20;
     const POST_TIMEOUT_MS = 12000;
 
@@ -149,6 +149,7 @@
     let lineCount = 0;                 // dynamic number of rows
     let extValues = [];                // extended per row, indexed by (line-1)
     let cachedOptions = {components:[], colors:[], gauges:[], flanges:[]};
+    let validCombos = [];              // all valid Component/Color/Gauge/Flange combos from sheet
 
     function setMsg(txt, ok){
       const m = $('msg'); m.textContent = txt || '';
@@ -182,6 +183,69 @@
         if(j.error) throw new Error(j.error);
         return j;
       } finally { clearTimeout(t); }
+    }
+
+    // ----- helpers for conditional dropdowns -----
+
+    function rebuildSelectOptions(selectEl, allowedValues, currentValue) {
+      if (!selectEl) return;
+      const prev = currentValue ?? selectEl.value ?? '';
+      selectEl.innerHTML = '';
+      allowedValues.forEach(v => {
+        const o = document.createElement('option');
+        o.value = o.textContent = v;
+        selectEl.appendChild(o);
+      });
+      if (prev && allowedValues.includes(prev)) {
+        selectEl.value = prev;
+      }
+    }
+
+    function updateLineOptions(idx) {
+      const compSel   = $('component-' + idx);
+      const colorSel  = $('color-' + idx);
+      const gaugeSel  = $('gauge-' + idx);
+      const flangeSel = $('flange-' + idx);
+      if (!compSel || !colorSel || !gaugeSel || !flangeSel) return;
+
+      const curComp   = compSel.value || '';
+      const curColor  = colorSel.value || '';
+      const curGauge  = gaugeSel.value || '';
+      const curFlange = flangeSel.value || '';
+
+      // If we don't have combos (old backend), just use global lists
+      if (!validCombos.length) {
+        rebuildSelectOptions(compSel,   cachedOptions.components || [], curComp);
+        rebuildSelectOptions(colorSel,  cachedOptions.colors     || [], curColor);
+        rebuildSelectOptions(gaugeSel,  cachedOptions.gauges     || [], curGauge);
+        rebuildSelectOptions(flangeSel, cachedOptions.flanges    || [], curFlange);
+        return;
+      }
+
+      let filtered = validCombos.filter(c =>
+        (!curComp   || c.component === curComp) &&
+        (!curColor  || c.color     === curColor) &&
+        (!curGauge  || c.gauge     === curGauge) &&
+        (!curFlange || c.flange    === curFlange)
+      );
+
+      // if nothing matches (e.g., user picked an impossible combo), fall back to looser match
+      if (!filtered.length) {
+        filtered = validCombos.filter(c =>
+          (!curComp  || c.component === curComp) &&
+          (!curColor || c.color     === curColor)
+        );
+      }
+
+      const allowedComponents = new Set(filtered.map(c => c.component));
+      const allowedColors     = new Set(filtered.map(c => c.color));
+      const allowedGauges     = new Set(filtered.map(c => c.gauge));
+      const allowedFlanges    = new Set(filtered.map(c => c.flange));
+
+      rebuildSelectOptions(compSel,   [...allowedComponents].sort(), curComp);
+      rebuildSelectOptions(colorSel,  [...allowedColors].sort(),     curColor);
+      rebuildSelectOptions(gaugeSel,  [...allowedGauges].sort(),     curGauge);
+      rebuildSelectOptions(flangeSel, [...allowedFlanges].sort(),    curFlange);
     }
 
     // ----- render a single line -----
@@ -218,23 +282,20 @@
       `;
       wrap.appendChild(row);
 
-      // Fill dropdowns from cached options
-      const fill = (sel, items) => {
-        sel.innerHTML = '';
-        items.forEach(v => {
-          const o = document.createElement('option');
-          o.value = o.textContent = v;
-          sel.appendChild(o);
-        });
-      };
-      fill($('component-'+idx), cachedOptions.components);
-      fill($('color-'+idx),     cachedOptions.colors);
-      fill($('gauge-'+idx),     cachedOptions.gauges);
-      fill($('flange-'+idx),    cachedOptions.flanges);
+      // initial population based on combos
+      updateLineOptions(idx);
 
       // Handlers
       qs(row,'[data-calc-one]').addEventListener('click',()=>calculateOne(idx));
       qs(row,'[data-remove]').addEventListener('click',()=>removeLine(idx));
+
+      // when any select changes, re-filter allowed options
+      ['component','color','gauge','flange'].forEach(name => {
+        const el = $(name + '-' + idx);
+        if (el) {
+          el.addEventListener('change', () => updateLineOptions(idx));
+        }
+      });
     }
 
     function removeLine(idx){
@@ -265,10 +326,18 @@
           gauges:     data.gauges || [],
           flanges:    data.flanges || []
         };
+        validCombos = data.combos || [];
+
         // if first load and no lines yet, add one
-        if (document.querySelectorAll('#linesContainer section.row').length === 0) {
+        const rows = Array.from(document.querySelectorAll('#linesContainer section.row'));
+        if (rows.length === 0) {
           lineCount = 0; extValues = [];
           addLine();
+        } else {
+          rows.forEach(r => {
+            const i = Number(r.dataset.idx);
+            if (i) updateLineOptions(i);
+          });
         }
         setMsg('Options loaded.', true);
       }catch(err){ setMsg(err.message, false); }
