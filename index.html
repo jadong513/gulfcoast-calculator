@@ -40,6 +40,11 @@
     .msg.ok{color:var(--ok)} .msg.err{color:var(--err)}
     footer{margin:26px 0 4px;color:var(--muted);font-size:.8rem;text-align:center}
 
+    /* Hide Current Lines (B–K) block */
+    #currentLinesSection {
+      display: none !important;
+    }
+
     /* Clean print layout for the summary view */
     @media print {
       body{ background:#fff; color:#000; }
@@ -107,22 +112,24 @@
         </table>
       </div>
 
-      <!-- Public view from sheet (B–K) -->
-      <h2 class="section-title">Current Lines (B–K)</h2>
-      <div class="line-actions" style="justify-content:flex-start;margin:8px 0 12px">
-        <button class="btn-ghost" id="loadSheetLinesBtn">Reload Lines</button>
-      </div>
-      <div class="card" style="background:#0b1d3d;border-radius:14px;padding:0;overflow:auto;border:1px solid #1a3570">
-        <table>
-          <thead>
-            <tr>
-              <th>Price Code</th><th>Component</th><th>Color</th><th>Gauge</th><th>Flange</th>
-              <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
-              <th class="num">Total Inches</th><th class="num">Est. Cost</th>
-            </tr>
-          </thead>
-          <tbody id="sheetLinesBody"></tbody>
-        </table>
+      <!-- Public view from sheet (B–K) – now wrapped & hidden -->
+      <div id="currentLinesSection">
+        <h2 class="section-title">Current Lines (B–K)</h2>
+        <div class="line-actions" style="justify-content:flex-start;margin:8px 0 12px">
+          <button class="btn-ghost" id="loadSheetLinesBtn">Reload Lines</button>
+        </div>
+        <div class="card" style="background:#0b1d3d;border-radius:14px;padding:0;overflow:auto;border:1px solid #1a3570">
+          <table>
+            <thead>
+              <tr>
+                <th>Price Code</th><th>Component</th><th>Color</th><th>Gauge</th><th>Flange</th>
+                <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
+                <th class="num">Total Inches</th><th class="num">Est. Cost</th>
+              </tr>
+            </thead>
+            <tbody id="sheetLinesBody"></tbody>
+          </table>
+        </div>
       </div>
 
       <div class="msg" id="msg"></div>
