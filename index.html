@@ -17,6 +17,7 @@
     p.subtitle{margin:.25rem 0 0;color:var(--muted)}
     .row{border-top:1px dashed #2a4e9a;padding-top:14px;margin-top:14px}
     .grid-3{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:14px}
+    .grid-4{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:14px}
     .field{display:flex;flex-direction:column;gap:6px}
     label{font-size:.85rem;color:var(--muted)}
     select,input{background:#0b1d3d;border:1px solid #1a3570;color:var(--text);padding:10px 12px;border-radius:12px;outline:none;transition:.15s;width:100%}
@@ -52,7 +53,10 @@
       @page { margin: 16mm }
     }
 
-    @media (max-width:900px){.result{grid-template-columns:repeat(2,1fr)}}
+    @media (max-width:900px){
+      .result{grid-template-columns:repeat(2,1fr)}
+      .grid-4{grid-template-columns:repeat(2,minmax(150px,1fr))}
+    }
   </style>
 </head>
 <body>
@@ -62,7 +66,7 @@
         <img src="LOGO_URL" alt="Gulf Coast Supply & Manufacturing" onerror="this.style.display='none'">
         <div>
           <h1>Gulf Coast • Internal Cost Calculator</h1>
-          <p class="subtitle">Live numbers from Google Sheets (K:L:M ➜ O). Pick options, enter length, get cost.</p>
+          <p class="subtitle">Live numbers from Google Sheets price table. Pick options, enter length, get cost.</p>
         </div>
       </header>
 
@@ -94,7 +98,7 @@
         <table>
           <thead>
             <tr>
-              <th>#</th><th>Component</th><th>Color</th><th>Gauge</th>
+              <th>#</th><th>Component</th><th>Color</th><th>Gauge</th><th>Flange</th>
               <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
               <th class="num">Total Inches</th><th class="num">Extended</th>
             </tr>
@@ -103,8 +107,8 @@
         </table>
       </div>
 
-      <!-- Public view from sheet (B–I) -->
-      <h2 class="section-title">Current Lines (B–I)</h2>
+      <!-- Public view from sheet (B–K) -->
+      <h2 class="section-title">Current Lines (B–K)</h2>
       <div class="line-actions" style="justify-content:flex-start;margin:8px 0 12px">
         <button class="btn-ghost" id="loadSheetLinesBtn">Reload Lines</button>
       </div>
@@ -112,7 +116,7 @@
         <table>
           <thead>
             <tr>
-              <th>Component</th><th>Color</th><th>Gauge</th>
+              <th>Price Code</th><th>Component</th><th>Color</th><th>Gauge</th><th>Flange</th>
               <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
               <th class="num">Total Inches</th><th class="num">Est. Cost</th>
             </tr>
@@ -122,7 +126,7 @@
       </div>
 
       <div class="msg" id="msg"></div>
-      <footer>Only B–I are intended for public viewing. Pricing table remains hidden/private.</footer>
+      <footer>Only B–K are intended for public viewing. Pricing table remains hidden/private.</footer>
     </div>
   </div>
 
@@ -137,7 +141,7 @@
 
     let lineCount = 0;                 // dynamic number of rows
     let extValues = [];                // extended per row, indexed by (line-1)
-    let cachedOptions = {components:[], colors:[], gauges:[]};
+    let cachedOptions = {components:[], colors:[], gauges:[], flanges:[]};
 
     function setMsg(txt, ok){
       const m = $('msg'); m.textContent = txt || '';
@@ -187,10 +191,11 @@
             <button class="btn-danger" data-remove>Remove</button>
           </div>
         </div>
-        <div class="grid-3">
+        <div class="grid-4">
           <div class="field"><label>Component</label><select id="component-${idx}"></select></div>
           <div class="field"><label>Color</label><select id="color-${idx}"></select></div>
           <div class="field"><label>Gauge</label><select id="gauge-${idx}"></select></div>
+          <div class="field"><label>Flange</label><select id="flange-${idx}"></select></div>
         </div>
         <div class="grid-3" style="margin-top:8px">
           <div class="field"><label>Quantity</label><input id="qty-${idx}" type="number" min="1" step="1" value="1"></div>
@@ -210,12 +215,15 @@
       const fill = (sel, items) => {
         sel.innerHTML = '';
         items.forEach(v => {
-          const o = document.createElement('option'); o.value = o.textContent = v; sel.appendChild(o);
+          const o = document.createElement('option');
+          o.value = o.textContent = v;
+          sel.appendChild(o);
         });
       };
       fill($('component-'+idx), cachedOptions.components);
       fill($('color-'+idx),     cachedOptions.colors);
       fill($('gauge-'+idx),     cachedOptions.gauges);
+      fill($('flange-'+idx),    cachedOptions.flanges);
 
       // Handlers
       qs(row,'[data-calc-one]').addEventListener('click',()=>calculateOne(idx));
@@ -246,8 +254,9 @@
         const data = await fetchJSON(WEB_APP_URL + '?fn=options&t=' + Date.now());
         cachedOptions = {
           components: data.components || [],
-          colors: data.colors || [],
-          gauges: data.gauges || []
+          colors:     data.colors || [],
+          gauges:     data.gauges || [],
+          flanges:    data.flanges || []
         };
         // if first load and no lines yet, add one
         if (document.querySelectorAll('#linesContainer section.row').length === 0) {
@@ -263,12 +272,13 @@
       const component = $('component-'+i)?.value ?? '';
       const color     = $('color-'+i)?.value ?? '';
       const gauge     = $('gauge-'+i)?.value ?? '';
+      const flange    = $('flange-'+i)?.value ?? '';
       const qty       = $('qty-'+i)?.value || '1';
       const feet      = $('feet-'+i)?.value || '0';
       const inches    = $('inches-'+i)?.value || '0';
       const ftNum     = Number(feet)||0, inNum = Number(inches)||0, qNum = Number(qty)||0;
-      const filled    = component && color && gauge && qNum>0 && (ftNum>0 || inNum>0);
-      return { i, component, color, gauge, qty, feet, inches, filled };
+      const filled    = component && color && gauge && flange && qNum>0 && (ftNum>0 || inNum>0);
+      return { i, component, color, gauge, flange, qty, feet, inches, filled };
     }
 
     // single-line calc (GET)
@@ -292,6 +302,7 @@
           component: line.component,
           color:     line.color,
           gauge:     line.gauge,
+          flange:    line.flange,
           qty:       line.qty,
           feet:      line.feet,
           inches:    line.inches
@@ -340,7 +351,15 @@
         try{
           data = await postJSON(WEB_APP_URL, {
             fn: 'price_batch',
-            lines: filled.map(({component,color,gauge,qty,feet,inches}) => ({component,color,gauge,qty,feet,inches})),
+            lines: filled.map(({component,color,gauge,flange,qty,feet,inches}) => ({
+              component,
+              color,
+              gauge,
+              flange,
+              qty,
+              feet,
+              inches
+            })),
             t: Date.now()
           });
         }catch(e){
@@ -353,6 +372,7 @@
               component: ln.component,
               color:     ln.color,
               gauge:     ln.gauge,
+              flange:    ln.flange,
               qty:       ln.qty,
               feet:      ln.feet,
               inches:    ln.inches
@@ -362,7 +382,7 @@
               data.lines.push(one);
               await delay(60); // gentle pacing
             }catch(errLine){
-              data.lines.push({ error: String(errLine), key: `${ln.component}|${ln.color}|${ln.gauge}` });
+              data.lines.push({ error: String(errLine), key: `${ln.component}|${ln.color}|${ln.gauge}|${ln.flange}` });
             }
           }
         }
@@ -434,7 +454,7 @@
 <table>
   <thead>
     <tr>
-      <th>#</th><th>Component</th><th>Color</th><th>Gauge</th>
+      <th>#</th><th>Component</th><th>Color</th><th>Gauge</th><th>Flange</th>
       <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
       <th class="num">Total Inches</th><th class="num">Extended</th>
     </tr>
@@ -447,6 +467,7 @@
     <td>${r.component||''}</td>
     <td>${r.color||''}</td>
     <td>${r.gauge||''}</td>
+    <td>${r.flange||''}</td>
     <td class="num">${r.qty||0}</td>
     <td class="num">${r.feet||0}</td>
     <td class="num">${r.inches||0}</td>
@@ -457,7 +478,7 @@
   </tbody>
 </table>
 <div class="subtotal">Subtotal: ${fmtMoney(subtotal)}</div>
-<div class="note">For internal use only. Pricing sourced live from Google Sheets (K:L:M ➜ O).</div>
+<div class="note">For internal use only. Pricing sourced live from a hidden price table in Google Sheets.</div>
 <script>window.onload = () => window.print();<\/script>
 </body></html>`;
       return head + body + tail;
@@ -474,9 +495,18 @@
         const ext = Number(extValues[i-1])||0;
         if (!ln.filled && ext===0) return;
         const totalInches = (Number(ln.qty)||0) * (12*(Number(ln.feet)||0) + (Number(ln.inches)||0));
-        rows.push({ i, component:ln.component, color:ln.color, gauge:ln.gauge,
-                    qty:ln.qty, feet:ln.feet, inches:ln.inches,
-                    totalInches, extended:ext });
+        rows.push({
+          i,
+          component: ln.component,
+          color:     ln.color,
+          gauge:     ln.gauge,
+          flange:    ln.flange,
+          qty:       ln.qty,
+          feet:      ln.feet,
+          inches:    ln.inches,
+          totalInches,
+          extended:  ext
+        });
       });
       return rows;
     }
@@ -488,7 +518,7 @@
       w.document.open(); w.document.write(html); w.document.close();
     }
 
-    // public sheet B–I viewer
+    // public sheet B–K viewer
     async function loadSheetLines(){
       try{
         setMsg('Loading lines…');
@@ -496,12 +526,19 @@
         const tbody = $('sheetLinesBody'); tbody.innerHTML = '';
         const rows = (data && data.rows) || [];
         rows.forEach(r => {
-          const [comp,col,g,qty,ft,inch,total,est] = r;
+          const [priceCode, comp, col, g, flange, qty, ft, inch, total, est] = r;
           const tr = document.createElement('tr');
           const td = (t,c)=>{ const d=document.createElement('td'); d.textContent = (t??''); if(c) d.className=c; return d; };
-          tr.appendChild(td(comp)); tr.appendChild(td(col)); tr.appendChild(td(g));
-          tr.appendChild(td(qty,'num')); tr.appendChild(td(ft,'num')); tr.appendChild(td(inch,'num'));
-          tr.appendChild(td(total,'num')); tr.appendChild(td(typeof est==='number' ? ('$'+Number(est).toFixed(2)) : est,'num'));
+          tr.appendChild(td(priceCode));
+          tr.appendChild(td(comp));
+          tr.appendChild(td(col));
+          tr.appendChild(td(g));
+          tr.appendChild(td(flange));
+          tr.appendChild(td(qty,'num'));
+          tr.appendChild(td(ft,'num'));
+          tr.appendChild(td(inch,'num'));
+          tr.appendChild(td(total,'num'));
+          tr.appendChild(td(typeof est==='number' ? ('$'+Number(est).toFixed(2)) : est,'num'));
           tbody.appendChild(tr);
         });
         setMsg(`Loaded ${rows.length} line(s).`, true);
@@ -533,6 +570,7 @@
         tr.appendChild(td(r.component));
         tr.appendChild(td(r.color));
         tr.appendChild(td(r.gauge));
+        tr.appendChild(td(r.flange));
         tr.appendChild(td(r.qty,'num'));
         tr.appendChild(td(r.feet,'num'));
         tr.appendChild(td(r.inches,'num'));
