@@ -103,7 +103,7 @@
         <table>
           <thead>
             <tr>
-              <th>#</th><th>Component</th><th>Color</th><th>Gauge</th><th>Flange</th>
+              <th>#</th><th>Component</th><th>Color</th><th>Gauge</th><th>Web</th>
               <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
               <th class="num">Total Inches</th><th class="num">Extended</th>
             </tr>
@@ -122,7 +122,7 @@
           <table>
             <thead>
               <tr>
-                <th>Price Code</th><th>Component</th><th>Color</th><th>Gauge</th><th>Flange</th>
+                <th>Price Code</th><th>Component</th><th>Color</th><th>Gauge</th><th>Web</th>
                 <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
                 <th class="num">Total Inches</th><th class="num">Est. Cost</th>
               </tr>
@@ -266,7 +266,7 @@
           <div class="field"><label>Component</label><select id="component-${idx}"></select></div>
           <div class="field"><label>Color</label><select id="color-${idx}"></select></div>
           <div class="field"><label>Gauge</label><select id="gauge-${idx}"></select></div>
-          <div class="field"><label>Flange</label><select id="flange-${idx}"></select></div>
+          <div class="field"><label>Web</label><select id="flange-${idx}"></select></div>
         </div>
         <div class="grid-3" style="margin-top:8px">
           <div class="field"><label>Quantity</label><input id="qty-${idx}" type="number" min="1" step="1" value="1"></div>
@@ -275,7 +275,7 @@
         </div>
         <div class="result" id="result-${idx}" hidden>
           <div class="stat"><div class="k">Total Inches (line)</div><div class="v" id="rInches-${idx}">–</div></div>
-          <div class="stat"><div class="k">Cost / Inch</div><div class="v" id="rCpi-${idx}">–</div></div>
+          <div class="stat"><div class="k">Cost / Ft</div><div class="v" id="rCpi-${idx}">–</div></div>
           <div class="stat"><div class="k">Extended</div><div class="v" id="rExt-${idx}">–</div></div>
           <div class="stat"><div class="k">Source</div><div class="v" id="rSrc-${idx}">Sheet</div></div>
         </div>
@@ -385,7 +385,12 @@
         });
         const data = await fetchJSON(WEB_APP_URL + '?' + params.toString() + '&t=' + Date.now());
         $('rInches-'+i).textContent = Number(data.totalInches).toLocaleString();
-        $('rCpi-'+i).textContent    = '$' + Number(data.costPerInch).toFixed(4);
+
+        // convert cost-per-inch to cost-per-foot for display
+        const cpi = Number(data.costPerInch) || 0;
+        const cpf = cpi * 12;
+        $('rCpi-'+i).textContent = '$' + cpf.toFixed(4);
+
         const ext = Number(data.extended) || 0;
         $('rExt-'+i).textContent = '$' + ext.toFixed(2);
         $('rSrc-'+i).textContent = data.key || 'Sheet';
@@ -475,8 +480,12 @@
             extValues[i-1] = 0;
           } else {
             $('rInches-'+i).textContent = Number(r.totalInches).toLocaleString();
-            $('rCpi-'+i).textContent    = '$' + Number(r.costPerInch).toFixed(4);
-            $('rExt-'+i).textContent    = '$' + Number(r.extended).toFixed(2);
+
+            const cpi = Number(r.costPerInch) || 0;
+            const cpf = cpi * 12;
+            $('rCpi-'+i).textContent = '$' + cpf.toFixed(4);
+
+            $('rExt-'+i).textContent = '$' + Number(r.extended).toFixed(2);
             $('rSrc-'+i).textContent    = r.key || 'Sheet';
             $('result-'+i).hidden       = false;
             extValues[i-1] = Number(r.extended) || 0;
@@ -530,7 +539,7 @@
 <table>
   <thead>
     <tr>
-      <th>#</th><th>Component</th><th>Color</th><th>Gauge</th><th>Flange</th>
+      <th>#</th><th>Component</th><th>Color</th><th>Gauge</th><th>Web</th>
       <th class="num">Qty</th><th class="num">Feet</th><th class="num">Inches</th>
       <th class="num">Total Inches</th><th class="num">Extended</th>
     </tr>
